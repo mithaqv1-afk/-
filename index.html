@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="application-name" content="مستمسكات">
+    <meta name="description" content="ترتيب وتجهيز المستمسكات الرسمية للطباعة والتصدير PDF">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="manifest" href="manifest.webmanifest">
+    <title>مستمسكات</title>
+    <!-- Tailwind CSS for modern interface -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- html2pdf.js for client-side PDF export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- Google Fonts Cairo -->
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        html, body { max-width: 100%; overflow-x: hidden; }
+        body { font-family: 'Cairo', sans-serif; }
+
+        /* شكل البطاقة داخل ملف الـPDF */
+        .id-card-box {
+            aspect-ratio: 1.58 / 1;
+            width: 100%;
+            max-width: 320px;
+            height: auto;
+        }
+
+        /* A4 الحقيقي: هذا الجزء يستخدم للتصدير فقط */
+        .a4-page {
+            width: 210mm;
+            min-height: 297mm;
+            padding: var(--page-margin, 15mm);
+            background: white;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.10);
+            margin: 0 auto 2rem auto;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        /* منطقة المعاينة على الهاتف */
+        #previewPanel {
+            width: 100%;
+            min-width: 0;
+            overflow: hidden !important;
+        }
+        #previewPages {
+            width: 100%;
+            max-width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 18px;
+            overflow: hidden;
+        }
+        .preview-page-wrap {
+            width: min(100%, 370px);
+            max-width: 370px;
+            overflow: hidden;
+            border-radius: 6px;
+            box-shadow: 0 8px 22px rgba(15,23,42,.16);
+            background: white;
+        }
+        .preview-page {
+            width: 100%;
+            aspect-ratio: 210 / 297;
+            background: white;
+            padding: var(--preview-margin-y, 5.35%) var(--preview-margin-x, 7.15%);
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            overflow: hidden;
+        }
+        .preview-doc-row {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5%;
+            padding: 2.1% 0;
+        }
+        .preview-card {
+            width: 43%;
+            aspect-ratio: 1.58 / 1;
+            background: white;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .preview-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: fill;
+            display: block;
+        }
+        .preview-empty {
+            width: 100%; height: 100%;
+            border: 1px dashed #cbd5e1;
+            display: flex; align-items: center; justify-content: center;
+            color: #cbd5e1; font-size: 7px;
+        }
+
+        /* منطقة التصدير الحقيقية مخفية عن المستخدم */
+        #pdfExportArea {
+            position: fixed;
+            left: -100000px;
+            top: 0;
+            width: 210mm;
+            opacity: 0;
+            pointer-events: none;
+            overflow: visible;
+        }
+
+        .mobile-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+        @media (min-width: 640px) {
+            .mobile-action-grid { display: flex; flex-wrap: wrap; }
+        }
+        @media (max-width: 1023px) {
+            #previewPanel { order: 2; }
+        }
+        @media print {
+            #pdfExportArea {
+                position: static !important;
+                left: auto !important;
+                opacity: 1 !important;
+                pointer-events: auto !important;
+                width: 210mm !important;
+            }
+            body * { visibility: hidden; }
+            #pdfExportArea, #pdfExportArea * { visibility: visible; }
+            .a4-page {
+                position: relative;
+                box-shadow: none;
+                margin: 0;
+                page-break-after: always;
+            }
+        }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col justify-between">
+
+    <!-- Top Navigation Panel (Hidden during PDF export) -->
+    <header id="controlHeader" class="bg-slate-900 text-white shadow-lg py-4 px-6 no-print">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center space-x-3 space-x-reverse">
+                <div class="bg-emerald-600 text-white p-2.5 rounded-xl shadow font-bold text-lg">
+                    <i class="fa-solid fa-copy"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-black tracking-wide">مستمسكات</h1>
+                    <p class="text-xs text-slate-400">كل مستمسك (وجه وبجانبه ظهر) - بدون أي كتابة في الطباعة</p>
+                </div>
+            </div>
+            <div class="mobile-action-grid w-full sm:w-auto">
+                <button onclick="addNewDocumentRow()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2.5 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-2 shadow">
+                    <i class="fa-solid fa-plus"></i> إضافة مستمسك
+                </button>
+                <button onclick="togglePreview()" id="previewToggleBtn" class="bg-sky-600 hover:bg-sky-700 text-white px-3 py-2.5 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-2 shadow">
+                    <i class="fa-solid fa-eye"></i> معاينة الصفحة
+                </button>
+                <button onclick="resetAll()" class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-2.5 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-2 shadow">
+                    <i class="fa-solid fa-rotate-left"></i> تصفير الكل
+                </button>
+                <button onclick="exportCleanPDF()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2.5 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-2 shadow">
+                    <i class="fa-solid fa-file-pdf"></i> تصدير PDF
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Workspace Layout -->
+    <main class="max-w-6xl mx-auto w-full p-3 sm:p-5 grid grid-cols-1 lg:grid-cols-12 gap-4 my-3 flex-grow">
+        
+        <!-- Left Controls Column (5 Cols) -->
+        <div class="lg:col-span-5 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-5 flex flex-col justify-between no-print min-w-0">
+            <div class="space-y-4">
+                <div class="border-b pb-3">
+                    <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-list-check text-emerald-600"></i> قائمة المستمسكات المضافة
+                    </h2>
+                    <p class="text-[11px] text-slate-500 mt-0.5">قم برفع (الوجه والظهر) لكل مستمسك. سيتم ترتيبها تلقائياً بالصفحات وبدون أي كتابة مطبوعة.</p>
+                </div>
+
+                <!-- التحكم بحدود الصفحة -->
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 no-print">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-bold text-slate-700 flex items-center gap-2">
+                            <i class="fa-solid fa-border-all text-indigo-600"></i> حدود الصفحة
+                        </span>
+                        <span id="pageMarginValue" class="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg">متوسطة 15 مم</span>
+                    </div>
+                    <input id="pageMarginSlider" type="range" min="5" max="25" value="15" step="1"
+                        class="w-full accent-indigo-600 cursor-pointer" oninput="updatePageMargin(this.value)">
+                    <div class="flex justify-between text-[9px] text-slate-400 mt-1">
+                        <span>ضيقة</span><span>متوسطة</span><span>عريضة</span>
+                    </div>
+                </div>
+
+                <!-- Dynamic Documents List Container -->
+                <div id="documentsListContainer" class="space-y-4 max-h-[500px] overflow-y-auto pr-1">
+                    <!-- Items will be injected dynamically via JavaScript -->
+                </div>
+            </div>
+
+            <div class="mt-6 pt-4 border-t text-center text-xs text-slate-400">
+                <p>ملاحظة: يمكنك إضافة عدة مستمسكات (بطاقة وطنية، بطاقة سكن، هوية...) وسيتم توزيعها على صفحات A4 تلقائياً.</p>
+            </div>
+        </div>
+
+        <!-- Right Live Preview Column (7 Cols) -->
+        <div id="previewPanel" class="lg:col-span-7 bg-slate-200 rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-start border border-slate-300 relative max-h-[760px] hidden min-w-0">
+            <div class="w-full flex items-center justify-between mb-3 bg-slate-900 text-white px-3 py-2 rounded-xl shadow no-print">
+                <span class="text-[11px] font-bold flex items-center gap-2">
+                    <i class="fa-solid fa-eye text-emerald-400"></i> المعاينة
+                </span>
+                <span class="text-[9px] text-slate-300">عرض مصغّر • A4</span>
+            </div>
+
+            <!-- معاينة مخصصة للهاتف، لا تؤثر على التصدير -->
+            <div id="previewPages"></div>
+
+            <!-- A4 حقيقي مخفي ويستخدم للتصدير فقط -->
+            <div id="pdfExportArea"></div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 py-3 text-center text-xs text-slate-400 no-print">
+        <p>مستمسكات — ترتيب وتجهيز المستمسكات للطباعة</p>
+    </footer>
+
+    <!-- Toast Notification Modal -->
+    <div id="toastNotification" class="fixed bottom-6 left-6 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-xl flex items-center gap-3 transform translate-y-20 opacity-0 transition-all duration-300 z-50 no-print">
+        <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400 text-lg"></i>
+        <span id="toastMessage" class="text-xs font-medium">تمت العملية بنجاح</span>
+    </div>
+
+    <script>
+        // State array holding all documents (each has front and back images)
+        let documentsData = [
+            { id: 1, title: 'المستمسك الأول (مثال: بطاقة وطنية)', front: null, back: null }
+        ];
+
+        // التحكم بحدود الصفحة: 5 مم ضيقة إلى 25 مم عريضة
+        function updatePageMargin(value) {
+            const margin = Number(value);
+            const label = document.getElementById('pageMarginValue');
+            const exportArea = document.getElementById('pdfExportArea');
+            const previewPages = document.getElementById('previewPages');
+
+            let text = 'متوسطة';
+            if (margin <= 9) text = 'ضيقة';
+            else if (margin >= 21) text = 'عريضة';
+
+            label.textContent = `${text} ${margin} مم`;
+            exportArea.style.setProperty('--page-margin', `${margin}mm`);
+
+            // نفس النسبة داخل المعاينة المصغرة
+            const x = (margin / 210) * 100;
+            const y = (margin / 297) * 100;
+            previewPages.style.setProperty('--preview-margin-x', `${x}%`);
+            previewPages.style.setProperty('--preview-margin-y', `${y}%`);
+
+            document.querySelectorAll('.a4-page').forEach(page => {
+                page.style.setProperty('--page-margin', `${margin}mm`);
+            });
+        }
+
+        // Initialize App on load
+        window.addEventListener('DOMContentLoaded', () => {
+            renderDocumentsList();
+            renderPreviewPages();
+            updatePageMargin(15);
+        });
+
+        // Add a new document row
+        function addNewDocumentRow() {
+            const newId = documentsData.length > 0 ? documentsData[documentsData.length - 1].id + 1 : 1;
+            documentsData.push({ id: newId, title: `مستمسك رقم ${newId}`, front: null, back: null });
+            renderDocumentsList();
+            renderPreviewPages();
+            showToast('تمت إضافة خانة مستمسك جديد', 'success');
+        }
+
+        // Remove a document row
+        function removeDocumentRow(id) {
+            if (documentsData.length === 1) {
+                showToast('يجب أن يكون هناك مستمسك واحد على الأقل', 'info');
+                return;
+            }
+            documentsData = documentsData.filter(doc => doc.id !== id);
+            renderDocumentsList();
+            renderPreviewPages();
+            showToast('تم حذف المستمسك', 'info');
+        }
+
+        // Handle image upload for specific document and side (front/back)
+        function handleDocumentImage(event, id, side) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const doc = documentsData.find(d => d.id === id);
+                if (doc) {
+                    doc[side] = e.target.result;
+                    renderDocumentsList();
+                    renderPreviewPages();
+                    showToast(`تم رفع ${side === 'front' ? 'وجه' : 'ظهر'} المستمسك بنجاح`, 'success');
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Clear single side image
+        function clearDocumentImage(id, side) {
+            const doc = documentsData.find(d => d.id === id);
+            if (doc) {
+                doc[side] = null;
+                renderDocumentsList();
+                renderPreviewPages();
+                showToast('تم إزالة الصورة', 'info');
+            }
+        }
+
+        // Render Control Panel List
+        function renderDocumentsList() {
+            const container = document.getElementById('documentsListContainer');
+            container.innerHTML = '';
+
+            documentsData.forEach((doc, index) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3';
+                
+                itemDiv.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-bold text-slate-700">مستمسك #${index + 1}</span>
+                        ${documentsData.length > 1 ? `<button onclick="removeDocumentRow(${doc.id})" class="text-rose-500 hover:text-rose-700 text-xs"><i class="fa-solid fa-trash-can"></i> حذف</button>` : ''}
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <!-- Front Upload -->
+                        <div class="border border-dashed border-slate-300 rounded-lg p-2 text-center bg-white cursor-pointer relative hover:border-indigo-500 transition" onclick="document.getElementById('front_file_${doc.id}').click()">
+                            <input type="file" id="front_file_${doc.id}" accept="image/*" class="hidden" onchange="handleDocumentImage(event, ${doc.id}, 'front')">
+                            ${doc.front ? `
+                                <div class="relative">
+                                    <img src="${doc.front}" class="w-full h-16 object-cover rounded">
+                                    <button onclick="event.stopPropagation(); clearDocumentImage(${doc.id}, 'front')" class="absolute top-0 right-0 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]"><i class="fa-solid fa-xmark"></i></button>
+                                </div>
+                            ` : `
+                                <div class="py-3 text-slate-400">
+                                    <i class="fa-solid fa-image text-sm mb-1"></i>
+                                    <p class="text-[10px] font-semibold">وجه المستمسك</p>
+                                </div>
+                            `}
+                        </div>
+                        <!-- Back Upload -->
+                        <div class="border border-dashed border-slate-300 rounded-lg p-2 text-center bg-white cursor-pointer relative hover:border-indigo-500 transition" onclick="document.getElementById('back_file_${doc.id}').click()">
+                            <input type="file" id="back_file_${doc.id}" accept="image/*" class="hidden" onchange="handleDocumentImage(event, ${doc.id}, 'back')">
+                            ${doc.back ? `
+                                <div class="relative">
+                                    <img src="${doc.back}" class="w-full h-16 object-cover rounded">
+                                    <button onclick="event.stopPropagation(); clearDocumentImage(${doc.id}, 'back')" class="absolute top-0 right-0 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]"><i class="fa-solid fa-xmark"></i></button>
+                                </div>
+                            ` : `
+                                <div class="py-3 text-slate-400">
+                                    <i class="fa-solid fa-image text-sm mb-1"></i>
+                                    <p class="text-[10px] font-semibold">ظهر المستمسك</p>
+                                <!-- ... existing code ... -->
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `;
+                container.appendChild(itemDiv);
+            });
+        }
+
+        // Render both the small phone preview and the real A4 export pages
+        function renderPreviewPages() {
+            const preview = document.getElementById('previewPages');
+            const exportArea = document.getElementById('pdfExportArea');
+            preview.innerHTML = '';
+            exportArea.innerHTML = '';
+
+            const activeDocs = documentsData.filter(d => d.front !== null || d.back !== null);
+
+            if (activeDocs.length === 0) {
+                preview.innerHTML = `
+                    <div class="preview-page-wrap">
+                        <div class="preview-page items-center justify-center text-slate-300 text-center">
+                            <i class="fa-solid fa-file-lines text-3xl mb-2"></i>
+                            <p class="text-[10px] font-bold leading-5">ارفع المستمسكات من القائمة<br>لتظهر هنا المعاينة</p>
+                        </div>
+                    </div>`;
+                const empty = document.createElement('div');
+                empty.className = 'a4-page flex items-center justify-center text-slate-300';
+                empty.innerHTML = `<div class="text-center"><i class="fa-solid fa-file-lines text-4xl mb-2"></i><p class="text-sm font-medium">قم برفع المستمسكات من القائمة لتظهر هنا</p></div>`;
+                exportArea.appendChild(empty);
+                return;
+            }
+
+            const docsPerPage = 4;
+            for (let i = 0; i < activeDocs.length; i += docsPerPage) {
+                const pageDocs = activeDocs.slice(i, i + docsPerPage);
+
+                // نسخة المعاينة الصغيرة
+                const wrap = document.createElement('div');
+                wrap.className = 'preview-page-wrap';
+                const page = document.createElement('div');
+                page.className = 'preview-page';
+                pageDocs.forEach(doc => {
+                    const row = document.createElement('div');
+                    row.className = 'preview-doc-row';
+                    row.innerHTML = `
+                        <div class="preview-card">${doc.front ? `<img src="${doc.front}" alt="وجه">` : `<div class="preview-empty">فارغ</div>`}</div>
+                        <div class="preview-card">${doc.back ? `<img src="${doc.back}" alt="ظهر">` : `<div class="preview-empty">فارغ</div>`}</div>`;
+                    page.appendChild(row);
+                });
+                wrap.appendChild(page);
+                preview.appendChild(wrap);
+
+                // نسخة A4 الحقيقية للتصدير
+                const exportPage = document.createElement('div');
+                exportPage.className = 'a4-page gap-8';
+                exportPage.style.setProperty('--page-margin', document.getElementById('pageMarginSlider')?.value + 'mm' || '15mm');
+                pageDocs.forEach(doc => {
+                    const row = document.createElement('div');
+                    row.className = 'w-full flex items-center justify-center gap-4 py-2';
+                    row.innerHTML = `
+                        <div class="id-card-box bg-white overflow-hidden flex items-center justify-center">
+                            ${doc.front ? `<img src="${doc.front}" class="w-full h-full object-fill" alt="Front">` : `<div class="border border-dashed border-slate-200 w-full h-full flex items-center justify-center text-[10px] text-slate-300">فارغ</div>`}
+                        </div>
+                        <div class="id-card-box bg-white overflow-hidden flex items-center justify-center">
+                            ${doc.back ? `<img src="${doc.back}" class="w-full h-full object-fill" alt="Back">` : `<div class="border border-dashed border-slate-200 w-full h-full flex items-center justify-center text-[10px] text-slate-300">فارغ</div>`}
+                        </div>`;
+                    exportPage.appendChild(row);
+                });
+                exportArea.appendChild(exportPage);
+            }
+        }
+
+        // Show / hide the page preview to keep the workspace compact
+        function togglePreview() {
+            const panel = document.getElementById('previewPanel');
+            const button = document.getElementById('previewToggleBtn');
+            const isHidden = panel.classList.contains('hidden');
+
+            panel.classList.toggle('hidden', !isHidden);
+            if (isHidden) {
+                button.innerHTML = '<i class="fa-solid fa-eye-slash"></i> إخفاء المعاينة';
+                setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80);
+            } else {
+                button.innerHTML = '<i class="fa-solid fa-eye"></i> معاينة الصفحة';
+            }
+        }
+
+        // Reset everything and return to the initial state
+        function resetAll() {
+            const confirmed = confirm('هل تريد تصفير كلشي؟\nسيتم حذف جميع الصور والمستمسكات المضافة والرجوع للحالة الأولى.');
+            if (!confirmed) return;
+
+            documentsData = [
+                { id: 1, title: 'المستمسك الأول (مثال: بطاقة وطنية)', front: null, back: null }
+            ];
+
+            renderDocumentsList();
+            renderPreviewPages();
+
+            const panel = document.getElementById('previewPanel');
+            const button = document.getElementById('previewToggleBtn');
+            panel.classList.add('hidden');
+            button.innerHTML = '<i class="fa-solid fa-eye"></i> معاينة الصفحة';
+
+            showToast('تم تصفير كلشي والرجوع للحالة الأولى', 'success');
+        }
+
+        // Custom Toast Notification System
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toastNotification');
+            const msgEl = document.getElementById('toastMessage');
+            const iconEl = document.getElementById('toastIcon');
+
+            msgEl.innerText = message;
+            if(type === 'success') {
+                iconEl.className = 'fa-solid fa-circle-check text-emerald-400 text-lg';
+            } else {
+                iconEl.className = 'fa-solid fa-circle-info text-sky-400 text-lg';
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        // Export Clean PDF (Completely free of text and controls)
+        function exportCleanPDF() {
+            const activeDocs = documentsData.filter(d => d.front !== null || d.back !== null);
+            if (activeDocs.length === 0) {
+                showToast('الرجاء رفع مستمسك واحد على الأقل قبل التصدير', 'info');
+                return;
+            }
+
+            showToast('جاري تصدير ملف الـ PDF النظيف...', 'success');
+
+            const element = document.getElementById('pdfExportArea');
+            // إظهار منطقة A4 الحقيقية مؤقتاً حتى يلتقطها html2pdf بالحجم الصحيح
+            const oldStyle = element.getAttribute('style') || '';
+            element.style.position = 'static';
+            element.style.left = 'auto';
+            element.style.top = 'auto';
+            element.style.opacity = '1';
+            element.style.pointerEvents = 'auto';
+            element.style.width = '210mm';
+            const opt = {
+                margin:       0,
+                filename:     'مستمسكات_رسمية_نظيفة.pdf',
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true, logging: false },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            html2pdf().from(element).set(opt).save().then(() => {
+                element.setAttribute('style', oldStyle);
+                showToast('تم تصدير ملف PDF بنجاح وحفظه', 'success');
+            }).catch(err => {
+                element.setAttribute('style', oldStyle);
+                console.error(err);
+                showToast('حدث خطأ أثناء التصدير، يرجى المحاولة مرة أخرى', 'info');
+            });
+        }
+    </script>
+</body>
+</html>
